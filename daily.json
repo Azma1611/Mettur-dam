@@ -1,0 +1,9 @@
+{
+  "dam_name": "Mettur Dam (Stanley Reservoir)",
+  "date": "Daily",
+  "water_level_ft": "Updated daily",
+  "storage_mcft": "Updated daily",
+  "inflow_cusecs": "Updated daily",
+  "outflow_cusecs": "Updated daily",
+  "source": "Public Tamil Nadu WRD data"
+}
