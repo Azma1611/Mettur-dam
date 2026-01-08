@@ -2,7 +2,7 @@ name: Mettur Dam Daily Update (Real Data)
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # Every day 6 AM UTC
+    - cron: '0 6 * * *'   # Runs daily at 6 AM UTC
   workflow_dispatch:
 
 jobs:
@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install tools
+      - name: Install required tools
         run: sudo apt-get update && sudo apt-get install -y curl jq bc
 
       - name: Fetch Mettur Dam data
@@ -61,10 +61,10 @@ jobs:
           }
           EOF
 
-      - name: Commit and push
+      - name: Commit and push changes
         run: |
           git config user.name "asma1611"
           git config user.email "asmaalavudeen2646@gmail.com"
           git add daily.json
-          git commit -m "Daily Mettur Dam update" || echo "No changes"
+          git commit -m "Daily Mettur Dam update" || echo "No changes to commit"
           git push
