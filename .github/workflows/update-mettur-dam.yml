@@ -2,7 +2,7 @@ name: Mettur Dam Daily Update (Real Data)
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # runs every day at 6 AM
+    - cron: '0 6 * * *'  # daily at 6 AM
   workflow_dispatch:
 
 jobs:
@@ -12,33 +12,29 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          ref: metturdam-patch-1
 
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y jq curl
+        run: sudo apt-get update && sudo apt-get install -y jq curl bc
 
       - name: Fetch Mettur Dam real data
         run: |
           DATE=$(date '+%Y-%m-%d')
 
-          # Download TN Agriculture reservoir page
           PAGE=$(curl -s "https://www.tnagriculture.in/ARS/home/reservoir")
-
-          # Extract the METTUR row
           ROW=$(echo "$PAGE" | grep -i "METTUR")
 
-          # Extract numbers (adjust column numbers if needed)
           LEVEL=$(echo "$ROW" | awk '{print $4}')
           STORAGE=$(echo "$ROW" | awk '{print $5}')
           INFLOW=$(echo "$ROW" | awk '{print $6}')
           OUTFLOW=$(echo "$ROW" | awk '{print $7}')
 
-          # Fallback if empty
           LEVEL=${LEVEL:-0}
           STORAGE=${STORAGE:-0}
           INFLOW=${INFLOW:-0}
           OUTFLOW=${OUTFLOW:-0}
 
-          # Calculate change
           if [ -f daily.json ]; then
             OLD_LEVEL=$(jq '.water_level_ft' daily.json)
           else
@@ -52,26 +48,25 @@ jobs:
             TREND="increased"
           fi
 
-          # Create JSON
           cat <<EOF > daily.json
-          {
-            "dam": "Mettur Dam (Stanley Reservoir)",
-            "date": "$DATE",
-            "water_level_ft": $LEVEL,
-            "storage_mcft": $STORAGE,
-            "inflow_cusecs": $INFLOW,
-            "outflow_cusecs": $OUTFLOW,
-            "water_level_change_ft": $CHANGE,
-            "trend": "$TREND",
-            "source": "https://www.tnagriculture.in/ARS/home/reservoir",
-            "last_updated": "$(date -u)"
-          }
-          EOF
+{
+  "dam": "Mettur Dam (Stanley Reservoir)",
+  "date": "$DATE",
+  "water_level_ft": $LEVEL,
+  "storage_mcft": $STORAGE,
+  "inflow_cusecs": $INFLOW,
+  "outflow_cusecs": $OUTFLOW,
+  "water_level_change_ft": $CHANGE,
+  "trend": "$TREND",
+  "source": "https://www.tnagriculture.in/ARS/home/reservoir",
+  "last_updated": "$(date -u)"
+}
+EOF
 
       - name: Commit & push
         run: |
           git config user.name "asma1611"
           git config user.email "asmaalavudeen2646@gmail.com"
           git add daily.json
-          git commit -m "Real Mettur Dam daily update" || echo "No changes"
-          git push
+          git commit -m "Real Mettur Dam daily update" || echo "No changes to commit"
+          git push origin metturdam-patch-1
