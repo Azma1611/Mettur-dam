@@ -1,0 +1,43 @@
+name: Update Mettur data
+
+on:
+  schedule:
+    # Runs daily at 06:00 UTC (adjust cron as needed)
+    - cron: '0 6 * * *'
+  workflow_dispatch: {} # allows manual run from GitHub Actions UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+
+      - name: Run fetch script
+        run: |
+          chmod +x scripts/fetch_mettur.py || true
+          python scripts/fetch_mettur.py
+
+      - name: Commit and push updated data (if changed)
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "github-actions[bot]"
+          if git status --porcelain | grep -q "data/data.json"; then
+            git add data/data.json
+            git commit -m "Update mettur data: $(date -I)"
+            git push origin HEAD:metturdam-patch-1
+          else
+            echo "No changes to commit"
+          fi
