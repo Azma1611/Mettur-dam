@@ -1,70 +1,172 @@
-name: Mettur Dam Daily Update (Real Data)
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mettur Dam - Water Level</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;max-width:1000px;margin:1rem auto;padding:0 1rem}
+    header{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+    .summary{margin:1rem 0;padding:1rem;border-radius:6px;background:#f6f8fa}
+    .change-up{color:green;font-weight:700}
+    .change-down{color:red;font-weight:700}
+    #chart-wrap{background:#fff;padding:1rem;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+    canvas{max-width:100%}
+    footer{margin-top:1rem;font-size:.9rem;color:#555}
+    .muted{color:#666;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mettur Dam - Water Level</h1>
+    <div id="last-updated" class="muted"></div>
+  </header>
 
-on:
-  schedule:
-    - cron: '0 6 * * *'   # Runs daily at 6 AM UTC
-  workflow_dispatch:
+  <div class="summary" id="summary">
+    Loading data...
+  </div>
 
-jobs:
-  update-dam-data:
-    runs-on: ubuntu-latest
+  <div id="chart-wrap">
+    <canvas id="chart" height="160"></canvas>
+  </div>
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+  <footer>
+    Data fetched daily by GitHub Actions. If numbers look wrong, update the fetch script in scripts/fetch_mettur.py
+  </footer>
 
-      - name: Install required tools
-        run: sudo apt-get update && sudo apt-get install -y curl jq bc
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <script>
+    async function loadAndDraw() {
+      const resp = await fetch('/data/data.json');
+      if (!resp.ok) {
+        document.getElementById('summary').textContent = 'Data not found. Make sure /data/data.json exists.';
+        return;
+      }
+      const arr = await resp.json(); // array of {date: "YYYY-MM-DD", level: number}
+      if (!Array.isArray(arr) || arr.length === 0) {
+        document.getElementById('summary').textContent = 'No data available.';
+        return;
+      }
 
-      - name: Fetch Mettur Dam data
-        run: |
-          DATE=$(date '+%Y-%m-%d')
+      // Sort by date just in case
+      arr.sort((a,b)=>a.date.localeCompare(b.date));
 
-          PAGE=$(curl -s "https://www.tnagriculture.in/ARS/home/reservoir")
+      // Display last updated
+      const last = arr[arr.length-1];
+      document.getElementById('last-updated').textContent = 'Last: ' + last.date;
 
-          ROW=$(echo "$PAGE" | grep -i "METTUR" | head -n 1)
+      // Prepare labels and values for last N days
+      const N = 90;
+      const slice = arr.slice(Math.max(0, arr.length - N));
+      const labels = slice.map(s=>s.date);
+      const levels = slice.map(s=>Number(s.level));
 
-          LEVEL=$(echo "$ROW" | awk '{print $4}')
-          STORAGE=$(echo "$ROW" | awk '{print $5}')
-          INFLOW=$(echo "$ROW" | awk '{print $6}')
-          OUTFLOW=$(echo "$ROW" | awk '{print $7}')
+      // Compute day-to-day delta (today - yesterday)
+      const deltas = [];
+      for (let i = 0; i < levels.length; i++) {
+        if (i === 0) deltas.push(null); // no delta for first point
+        else deltas.push(Number((levels[i] - levels[i-1]).toFixed(3)));
+      }
 
-          LEVEL=${LEVEL:-0}
-          STORAGE=${STORAGE:-0}
-          INFLOW=${INFLOW:-0}
-          OUTFLOW=${OUTFLOW:-0}
+      // Colors for delta bars
+      const deltaColors = deltas.map(d => {
+        if (d === null) return 'rgba(0,0,0,0.05)';
+        return d >= 0 ? 'rgba(0,150,0,0.6)' : 'rgba(220,20,60,0.6)';
+      });
 
-          if [ -f daily.json ]; then
-            OLD_LEVEL=$(jq '.water_level_ft' daily.json)
-          else
-            OLD_LEVEL=0
-          fi
+      // Summary: latest vs previous day
+      const today = levels[levels.length-1];
+      const yesterday = levels.length > 1 ? levels[levels.length-2] : null;
+      const diff = yesterday !== null ? (today - yesterday) : null;
+      const pct = (diff !== null && yesterday!==0) ? (diff / Math.abs(yesterday) * 100) : null;
 
-          CHANGE=$(awk "BEGIN {printf \"%.2f\", $LEVEL - $OLD_LEVEL}")
+      const summary = document.getElementById('summary');
+      summary.innerHTML = '';
+      const updown = diff === null ? '' : (diff >= 0 ? `<span class="change-up">+${diff.toFixed(2)} m</span>` : `<span class="change-down">${diff.toFixed(2)} m</span>`);
+      const pcttext = pct === null ? '' : ` (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`;
+      summary.innerHTML = `<div><strong>Latest level:</strong> ${today.toFixed(2)} m</div>
+                           <div><strong>Change vs previous day:</strong> ${updown}${pcttext}</div>
+                           <div class="muted" style="margin-top:.4rem">Graph shows water-level (line) and daily change (bars, green=increase, red=decrease)</div>`;
 
-          TREND="same"
-          if (( $(echo "$CHANGE > 0" | bc -l) )); then TREND="increased"; fi
-          if (( $(echo "$CHANGE < 0" | bc -l) )); then TREND="decreased"; fi
-
-          cat <<EOF > daily.json
-          {
-            "dam": "Mettur Dam (Stanley Reservoir)",
-            "date": "$DATE",
-            "water_level_ft": $LEVEL,
-            "storage_mcft": $STORAGE,
-            "inflow_cusecs": $INFLOW,
-            "outflow_cusecs": $OUTFLOW,
-            "water_level_change_ft": $CHANGE,
-            "trend": "$TREND",
-            "source": "https://www.tnagriculture.in/ARS/home/reservoir",
-            "last_updated": "$(date -u)"
+      // Build mixed chart: line (levels) + bar (deltas)
+      const ctx = document.getElementById('chart');
+      if (window.myChart) window.myChart.destroy();
+      window.myChart = new Chart(ctx, {
+        data: {
+          labels,
+          datasets: [
+            {
+              type: 'line',
+              label: 'Water level (m)',
+              data: levels,
+              borderColor: 'rgba(3,102,214,0.95)',
+              backgroundColor: 'rgba(3,102,214,0.08)',
+              pointRadius: 3,
+              pointHoverRadius: 6,
+              tension: 0.18,
+              yAxisID: 'y'
+            },
+            {
+              type: 'bar',
+              label: 'Daily change (m)',
+              data: deltas,
+              backgroundColor: deltaColors,
+              yAxisID: 'y1',
+              barThickness: 8,
+              maxBarThickness: 18
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          interaction: { mode: 'index', intersect: false },
+          stacked: false,
+          scales: {
+            x: {
+              display: true,
+              ticks: { maxRotation: 45, minRotation: 0 },
+            },
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              title: { display: true, text: 'Water level (m)' },
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              title: { display: true, text: 'Daily change (m)' },
+              grid: { drawOnChartArea: false },
+            }
+          },
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const dsLabel = context.dataset.label || '';
+                  const val = context.parsed.y;
+                  if (context.dataset.type === 'line') {
+                    return `${dsLabel}: ${Number(val).toFixed(2)} m`;
+                  } else {
+                    if (val === null) return `${dsLabel}: —`;
+                    const sign = val >= 0 ? '+' : '';
+                    return `${dsLabel}: ${sign}${Number(val).toFixed(3)} m`;
+                  }
+                }
+              }
+            }
           }
-          EOF
+        }
+      });
+    }
 
-      - name: Commit and push changes
-        run: |
-          git config user.name "asma1611"
-          git config user.email "asmaalavudeen2646@gmail.com"
-          git add daily.json
-          git commit -m "Daily Mettur Dam update" || echo "No changes to commit"
-          git push
+    loadAndDraw().catch(err=>{
+      console.error(err);
+      document.getElementById('summary').textContent = 'Error loading data.';
+    });
+  </script>
+</body>
+</html>
